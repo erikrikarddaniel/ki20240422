@@ -1,5 +1,5 @@
 ---
-title: "__TITLE__"
+title: "KI demo 20240422"
 author: "daniel.lundin@lnu.se"
 date: "`r format(Sys.time(), '%Y-%m-%d')`"
 format:
@@ -27,9 +27,6 @@ ggplot2::theme_set(ggplot2::theme_bw())
 #| include: false
 
 library(readr)
-library(feather)
-library(data.table)
-library(dtplyr)
 library(dplyr, warn.conflicts = FALSE)
 library(tidyr)
 library(purrr)
@@ -48,9 +45,46 @@ library(patchwork)
 
 ```{r read-data}
 #| label: read-data
+counts <- read_tsv('data/dada2/ASV_table.tsv', show_col_types = FALSE) %>%
+  pivot_longer(2:ncol(.), names_to = 'sample', values_to = 'count') %>%
+  filter(count > 0) %>%
+  group_by(sample) %>%
+  mutate(relab = count/sum(count)) %>%
+  ungroup()
+taxonomy <- read_tsv('data/dada2/ASV_tax.tsv', show_col_types = FALSE)
+samples <- read_tsv('data/samples.tsv', show_col_types = FALSE) %>%
+  filter(filter_fraction == '0.2')
+```
+
+```{r rank-phyla}
+#| label: rank-phyla
+
+phyla <- taxonomy %>%
+  filter(! is.na(Phylum)) %>%
+  inner_join(counts, by = join_by(ASV_ID)) %>%
+  group_by(Phylum, sample) %>%
+  summarise(relab = sum(relab), .groups = 'drop_last') %>%
+  summarise(relab = mean(relab)) %>%
+  arrange(desc(relab)) %>%
+  mutate(r = row_number())
+```
+
+```{r run-nmds}
+#| label: run-nmds
+#| include: false
+
+nmds <- counts %>%
+  select(ASV_ID, sample, relab) %>%
+  semi_join(samples, by = join_by(sample)) %>%
+  pivot_wider(names_from = ASV_ID, values_from = relab, values_fill = 0) %>%
+  data.frame() %>%
+  tibble::column_to_rownames('sample') %>%
+  vegan::metaMDS()
 ```
 
 # Version history
+
+* 20240422 First version *live demo*
 
 # Summary
 
@@ -72,6 +106,50 @@ cite_packages(output = "table", pkgs = "Session", out.dir = getwd()) %>%
 ```
 
 # Results
+
+## Stacked phylum barplot
+
+```{r fig-stacked-phyla}
+#| label: fig-stacked-phyla
+#| fig-cap: '**I really like when my students describe their plots with a nice caption.** This makes it much easier to understand what they did.'
+
+taxonomy %>%
+  inner_join(counts, by = join_by(ASV_ID)) %>%
+  left_join(
+    phyla %>% 
+      filter(r <= 12) %>%
+      transmute(Phylum, phylum = Phylum), 
+    by = join_by(Phylum)
+  ) %>%
+  group_by(phylum, sample) %>%
+  summarise(relab = sum(relab), .groups = 'drop') %>%
+  inner_join(samples %>% filter(lubridate::year(date) == 1972), by = join_by(sample)) %>%
+  ggplot(aes(x = date, y = relab, fill = phylum)) +
+  geom_col() +
+  scale_fill_brewer('Phylum', palette = 'Paired', na.value = 'grey') +
+  theme(
+    axis.text.x = element_text(angle = 65, hjust = 1)
+  )
+```
+
+## Ordination: NMDS
+
+```{r fig-nmds}
+#| label: fig-nmds
+#| fig-cap: '**NMDS**'
+
+# The x and y coordinates of our nmds object are stored in the points value. Turn that into a data.frame that we can plot.
+data.frame(nmds$points) %>%
+  # Sample names are as rownames, turn into a named column
+  tibble::rownames_to_column('sample') %>%
+  # Join in the samples so we can get the dates
+  inner_join(samples, by = join_by(sample)) %>%
+  # To get a column that indicates season, put julian dates (day of the year) on a scale from 0 (middle of summer) to 183 (365/2, winter)
+  mutate(season = abs(lubridate::yday(date) - 183)) %>%
+  ggplot(aes(x = MDS1, y = MDS2, colour = season)) +
+  geom_point() +
+  scale_colour_gradient('Number of days from 30 July', low = 'yellow', high = 'blue')
+```
 
 # Discussion
 
