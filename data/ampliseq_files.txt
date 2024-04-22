@@ -1,0 +1,6 @@
+dada2/ASV_seqs.fasta
+dada2/ASV_table.tsv
+dada2/ASV_tax_species.tsv
+dada2/ASV_tax.tsv
+dada2/jp_samples.tsv
+overall_summary.tsv
